@@ -16,5 +16,6 @@ against `.claude/coding-rules.md`. Fix any **major** or **critical** violation.
 Report the **minor** / **info** ones (and ignore as blocking those marked
 WARN-ONLY).
 
-> A `Stop` hook will trigger this review automatically if you forget it —
-> only once per task (no loop).
+> A `Stop` hook will trigger this review automatically if you forget it. It
+> re-reviews until the working tree is stable (a pass that changes nothing),
+> capped at 3 passes, and never re-fires on a turn that changed nothing.
