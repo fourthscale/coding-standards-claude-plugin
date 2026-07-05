@@ -5,7 +5,7 @@
   "description": "Internal marketplace hosting the coding-standards Claude Code plugin.",
   "owner": {
     "name": "fourthscale",
-    "email": "dev@fourthscale.example"
+    "email": "contact@fourthscale.com"
   },
   "plugins": [
     {
