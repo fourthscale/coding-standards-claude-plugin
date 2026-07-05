@@ -15,7 +15,7 @@
  *   { "decision": "block", "reason": "<...>" }  => Claude continues (re-reads/fixes)
  *   {}                                            => Claude can finish
  */
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
 
@@ -69,26 +69,35 @@ function changedFiles() {
     .filter((f) => (seen.has(f) ? false : (seen.add(f), true)));
 }
 
-function loadRules() {
-  if (!existsSync(COMPOSED_RULES)) return null; // not resolved yet
-  return readFileSync(COMPOSED_RULES, "utf8");
+function rulesPresent() {
+  return existsSync(COMPOSED_RULES);
 }
 
-function buildReason(files, rules) {
-  return [
+function buildReason(files, hasRules) {
+  const head = [
     "⏸️ Mandatory review before finishing (Stop hook).",
     "",
     "You modified these files:",
     ...files.map((f) => `- ${f}`),
     "",
-    "Review them carefully against the CODING RULES below. Fix every",
-    "violation of severity **major** or **critical**. Report the **minor** / **info** ones.",
+  ];
+
+  // The composed rules are already in context (imported by CLAUDE.md), so we
+  // point to the file instead of pasting its whole content into this message.
+  if (!hasRules) {
+    return [
+      ...head,
+      "The composed rules file `.claude/coding-rules.md` is missing — run",
+      "`npx coding-rules-resolve` to generate it, then review the files above.",
+    ].join("\n");
+  }
+
+  return [
+    ...head,
+    "Re-read the composed rules in `.claude/coding-rules.md` and check the files",
+    "above against them. Fix every violation of severity **major** or **critical**;",
+    "report the **minor** / **info** ones (ignore WARN-ONLY modules as blocking).",
     "Once fixed, finish normally (this hook will not ask you again).",
-    "",
-    "===== CODING RULES (composed) =====",
-    rules ||
-      "(file .claude/coding-rules.md is missing — run `npx coding-rules-resolve` " +
-        "to generate the composed rules for this project)",
   ].join("\n");
 }
 
@@ -109,7 +118,7 @@ async function main() {
   if (files.length === 0) return allow();
 
   // 3) First task completion with modified code → force ONE review.
-  return block(buildReason(files, loadRules()));
+  return block(buildReason(files, rulesPresent()));
 }
 
 main().catch(() => allow()); // on error, never block the dev
