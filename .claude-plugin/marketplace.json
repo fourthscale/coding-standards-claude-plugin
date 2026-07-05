@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "fourthscale-standards",
+  "version": "0.1.0",
+  "description": "Internal marketplace hosting the coding-standards Claude Code plugin.",
+  "owner": {
+    "name": "fourthscale",
+    "email": "dev@fourthscale.example"
+  },
+  "plugins": [
+    {
+      "name": "coding-standards",
+      "description": "Puts the project's composed rules in context and guarantees a review before each task completion (local Stop hook, no token).",
+      "version": "0.1.0",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}
