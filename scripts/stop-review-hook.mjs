@@ -7,16 +7,21 @@
  * resolver), then returns a decision in the format expected by Claude Code on
  * stdout. The plugin itself ships NO rules — they come from the consumer project.
  *
- * Anti-loop: Claude Code passes `stop_hook_active: true` in the input when we
- * are already in a continuation triggered by a Stop hook. In that case we do NOT
- * block → the review is forced only ONCE, then Claude finishes.
+ * Two things keep this from over-firing, both driven by a content-aware
+ * fingerprint of the working tree stored in `.git/` between invocations:
  *
- * Anti-repeat: `git diff HEAD` is cumulative until commit, so a turn that
- * changes NOTHING (e.g. the user just asked a question) still shows the diff
- * from earlier turns and would re-trigger a review. To avoid that, we store a
- * content-aware fingerprint of the working tree after each review, in
- * `.git/<STATE_FILE>`. If the current fingerprint equals the stored one, the
- * working tree hasn't changed since the last review → we let Claude finish.
+ *  - Anti-repeat: `git diff HEAD` is cumulative until commit, so a turn that
+ *    changes NOTHING (e.g. the user just asked a question) still shows earlier
+ *    uncommitted changes. If the fingerprint equals the last settled review, we
+ *    let Claude finish instead of re-reviewing.
+ *
+ *  - Review-until-stable: when a review pass edits code, those edits are
+ *    themselves re-reviewed. We keep forcing a pass as long as the fingerprint
+ *    keeps changing, and stop once a pass changes nothing (converged) — capped
+ *    at MAX_PASSES so a non-converging review can't loop forever.
+ *
+ * `stop_hook_active` (set by Claude Code inside a Stop-triggered continuation)
+ * is what tells a review pass apart from a fresh user turn.
  *
  * Output contract:
  *   { "decision": "block", "reason": "<...>" }  => Claude continues (re-reads/fixes)
@@ -34,6 +39,11 @@ const COMPOSED_RULES = join(process.cwd(), ".claude", "coding-rules.md");
 // The composed rules file itself isn't "work to review" — regenerating it
 // shouldn't trigger a review pass on its own.
 const SELF = [".claude/coding-rules.md"];
+
+// Upper bound on consecutive review passes within a single task. A review pass
+// that edits code gets re-reviewed; we stop once a pass changes nothing, or
+// after this many passes if the review never converges (safety against loops).
+const MAX_PASSES = 3;
 
 function allow() {
   process.stdout.write(JSON.stringify({}));
@@ -128,19 +138,23 @@ function fingerprint() {
   return h.digest("hex");
 }
 
-function readFingerprint(path) {
+// State = { fp, passes }:
+//   passes === 0  → fp is a settled/accepted baseline (last review converged).
+//   passes >= 1   → we're in a review chain; fp is the state last sent for
+//                   review, passes is how many review passes have run so far.
+function readState(path) {
   if (!path || !existsSync(path)) return null;
   try {
-    return readFileSync(path, "utf8").trim();
-  } catch {
-    return null;
-  }
+    const s = JSON.parse(readFileSync(path, "utf8"));
+    if (s && typeof s.fp === "string" && Number.isInteger(s.passes)) return s;
+  } catch {}
+  return null;
 }
 
-function writeFingerprint(path, fp) {
+function writeState(path, fp, passes) {
   if (!path || fp === null) return;
   try {
-    writeFileSync(path, fp);
+    writeFileSync(path, JSON.stringify({ fp, passes }));
   } catch {}
 }
 
@@ -183,29 +197,43 @@ async function main() {
 
   const state = stateFile();
   const fp = state ? fingerprint() : null;
-
-  // 1) Anti-loop: we're already inside a review continuation. Let it finish and
-  //    record the now-reviewed state so the NEXT turn compares against it.
-  if (input.stop_hook_active === true) {
-    writeFingerprint(state, fp);
-    return allow();
-  }
-
-  // 2) Nothing modified vs HEAD → nothing to review.
   const files = changedFiles();
+
+  // A) Nothing modified vs HEAD → nothing to review; record a settled baseline.
   if (files.length === 0) {
-    writeFingerprint(state, fp);
+    writeState(state, fp, 0);
     return allow();
   }
 
-  // 3) There ARE changes vs HEAD, but were they already reviewed? If the working
-  //    tree is byte-for-byte what it was after the last review, this turn changed
-  //    nothing (e.g. the user just asked a question) → don't re-trigger.
-  if (fp !== null && readFingerprint(state) === fp) {
+  const prev = readState(state);
+
+  if (input.stop_hook_active === true) {
+    // We're inside the review chain we forced earlier.
+    if (fp !== null && prev && prev.fp === fp) {
+      // The review pass changed nothing → converged → accept as baseline.
+      writeState(state, fp, 0);
+      return allow();
+    }
+    // The review edited code → re-verify those edits, but cap the number of
+    // passes so a review that never converges can't loop forever.
+    const passes = prev ? prev.passes : 1;
+    if (passes >= MAX_PASSES) {
+      writeState(state, fp, 0);
+      return allow();
+    }
+    writeState(state, fp, passes + 1);
+    return block(buildReason(files, rulesPresent()));
+  }
+
+  // Fresh user turn (not a review continuation).
+  // B) Unchanged since the last settled review → don't re-trigger (e.g. the user
+  //    just asked a question; the earlier diff is still uncommitted).
+  if (fp !== null && prev && prev.passes === 0 && prev.fp === fp) {
     return allow();
   }
 
-  // 4) New / unreviewed changes → force ONE review.
+  // C) New / unreviewed work → start a review chain.
+  writeState(state, fp, 1);
   return block(buildReason(files, rulesPresent()));
 }
 

@@ -11,7 +11,7 @@
     {
       "name": "coding-standards",
       "description": "Puts the project's composed rules in context and guarantees a review before each task completion (local Stop hook, no token).",
-      "version": "0.1.2",
+      "version": "0.1.3",
       "source": "./",
       "category": "productivity"
     }
