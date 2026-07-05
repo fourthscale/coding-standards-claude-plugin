@@ -1,6 +1,6 @@
 {
   "name": "coding-standards",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "Puts the internal coding rules (SOLID, DDD, hexagonal, security) in context, and guarantees a review before each task completion via a local Stop hook (no token, no network).",
   "author": {
     "name": "fourthscale"

@@ -6,7 +6,7 @@ The effective rules for THIS project are **composed** in the file:
 @.claude/coding-rules.md
 
 Follow them **while you write code**, not only at the end. If this file is
-missing, ask to run `npx coding-rules-resolve` (it generates the composed rules
+missing, ask to run `/update-coding-rules` (it generates the composed rules
 from `coding-rules.config.yml`).
 
 ## Mandatory review before finishing

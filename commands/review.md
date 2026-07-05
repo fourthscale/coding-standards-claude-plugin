@@ -14,5 +14,5 @@ Steps:
    the modules marked WARN-ONLY).
 4. End with a summary: what was fixed, and the remaining **minor**/**info** items.
 
-If `.claude/coding-rules.md` is missing, first run `npx coding-rules-resolve`.
+If `.claude/coding-rules.md` is missing, first run `/update-coding-rules`.
 Do not invent any violation: base yourself on the real code.

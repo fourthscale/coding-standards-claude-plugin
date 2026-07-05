@@ -173,7 +173,7 @@ function buildReason(files, hasRules) {
     return [
       ...head,
       "The composed rules file `.claude/coding-rules.md` is missing — run",
-      "`npx coding-rules-resolve` to generate it, then review the files above.",
+      "`/update-coding-rules` to generate it, then review the files above.",
     ].join("\n");
   }
 
