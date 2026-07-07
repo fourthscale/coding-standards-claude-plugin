@@ -1,53 +1,60 @@
 ---
-description: Review changed code against the composed rules. Optional arg — a `base[...target]` range (target defaults to HEAD; use `...local` to include uncommitted work).
+description: Review changed code against the composed rules. Optional arg — a `base[...target]` range (target defaults to `local` = working tree; use `...HEAD` for committed-only).
 ---
 
 Review code against this project's composed coding rules:
 
 @.claude/coding-rules.md
 
-## Scope — parse the range from `$ARGUMENTS`
+## Scope — resolve `$ARGUMENTS` with this exact procedure
 
-`$ARGUMENTS` is an optional `base[...target]` range:
-- `base` = any git ref (branch, tag, or commit SHA).
-- `target` = optional; defaults to `HEAD`. Special value `local` = the working
-  tree (includes uncommitted + untracked). Otherwise it's another ref/commit.
+`$ARGUMENTS` is an optional `base[...target]` range. Follow the steps in order;
+do not improvise or silently fall back to a different scope.
 
-Resolve the scope like this:
-
-**Empty** → review local uncommitted work only. (Equivalent to `HEAD...local`,
-since `merge-base HEAD HEAD` is `HEAD` — the empty case is just a shorthand.)
+**Step 1 — empty argument.** Review local uncommitted work and stop choosing:
 ```
 git diff --name-only HEAD
 git ls-files --others --exclude-standard
 ```
 
-**`base` (no `...`)** → alias for `base...HEAD`. **`base...HEAD`** or
-**`base...<ref>`** → the branch/range diff (three-dot: from the merge-base of the
-two refs to `target`). Committed changes only.
-```
-git rev-parse --verify --quiet "<base>^{commit}"     # bail with a clear message if this fails
-git rev-parse --verify --quiet "<target>^{commit}"   # (skip when target is HEAD)
-git diff --name-only "<base>"..."<target>"
-git diff "<base>"..."<target>" -- <file>             # actual hunks per file
-```
+**Step 2 — split on `...`.**
+- `base`   = the text before `...` (or the whole value when there is no `...`).
+- `target` = the text after `...`, or **`local`** when there is no `...` (an
+  omitted target always defaults to the working tree — consistent with bare
+  `/review`). Use `...HEAD` explicitly to review committed changes only.
 
-**`base...local`** → the same merge-base anchor, but ending at the **working
-tree** — i.e. the branch diff **plus** uncommitted (staged, unstaged) and
-untracked files.
-```
-git rev-parse --verify --quiet "<base>^{commit}"
-BASE=$(git merge-base "<base>" HEAD)
-git diff --name-only "$BASE"
-git ls-files --others --exclude-standard
-git diff "$BASE" -- <file>                           # actual hunks per file
-```
+**Step 3 — `local` is a keyword, NOT a git ref.** If `target` is the literal word
+`local`, it means "the working tree" (committed branch changes + staged + unstaged
++ untracked). **Never** pass `local` to `git rev-parse` or `git diff` as a ref.
 
-Notes:
-- Treat `base` (and a non-`local` `target`) as single git refs. If either doesn't
-  resolve, stop and say so — don't guess.
-- Untracked files only matter when the scope reaches the working tree (empty arg,
-  or `...local`); ignore them for commit-to-commit ranges.
+**Step 4 — validate the real refs.** Verify `base`. Verify `target` too, UNLESS
+it is `HEAD` or `local`:
+```
+git rev-parse --verify --quiet "<base>^{commit}"     # required
+git rev-parse --verify --quiet "<target>^{commit}"   # only if target is not HEAD and not local
+```
+If a ref does not resolve, **STOP and report it exactly** — do not review a
+different scope instead.
+
+**Step 5 — build the diff.**
+- If `target` is `local`:
+  ```
+  BASE=$(git merge-base "<base>" HEAD)
+  git diff --name-only "$BASE"
+  git ls-files --others --exclude-standard
+  git diff "$BASE" -- <file>                          # hunks per file
+  ```
+- Otherwise (`HEAD`, a branch, a tag, or a commit):
+  ```
+  git diff --name-only "<base>"..."<target>"
+  git diff "<base>"..."<target>" -- <file>            # hunks per file
+  ```
+
+Quick reference (an omitted target defaults to `local`): `/review` = `HEAD...local`
+· `/review main` = `main...local` (branch changes **+** uncommitted) ·
+`/review main...HEAD` = committed branch diff only · `/review a1b2...c3d4` =
+between two commits. Untracked files matter only when the scope reaches the
+working tree (i.e. whenever `target` is `local`).
 
 ## Steps
 
