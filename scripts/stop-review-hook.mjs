@@ -36,6 +36,13 @@ import { createHash } from "node:crypto";
 // Same artifact as the one imported by the project's CLAUDE.md → zero drift.
 const COMPOSED_RULES = join(process.cwd(), ".claude", "coding-rules.md");
 
+// The project's rules config (the resolver's input), checked in the two places
+// the resolver itself looks. Its presence signals intent to use the plugin.
+const CONFIG_FILES = [
+  join(process.cwd(), "coding-rules.config.yml"),
+  join(process.cwd(), ".claude", "coding-rules.config.yml"),
+];
+
 // The composed rules file itself isn't "work to review" — regenerating it
 // shouldn't trigger a review pass on its own.
 const SELF = [".claude/coding-rules.md"];
@@ -89,6 +96,13 @@ function changedFiles() {
 
 function rulesPresent() {
   return existsSync(COMPOSED_RULES);
+}
+
+// The project shows intent to use coding-standards if it has either the composed
+// rules or a config to generate them. When NEITHER exists, the plugin isn't
+// adopted here → the hook stays silent instead of nagging.
+function adopted() {
+  return existsSync(COMPOSED_RULES) || CONFIG_FILES.some(existsSync);
 }
 
 function git(cmd) {
@@ -194,6 +208,10 @@ async function main() {
   } catch {
     input = {};
   }
+
+  // Not adopted here (neither composed rules nor a config) → the plugin isn't in
+  // use in this project; do nothing.
+  if (!adopted()) return allow();
 
   const state = stateFile();
   const fp = state ? fingerprint() : null;
