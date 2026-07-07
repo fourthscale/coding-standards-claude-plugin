@@ -113,8 +113,16 @@ plugin reads it either way:
 
 - **`/update-coding-rules`** — composes `.claude/coding-rules.md` from the
   config's `extends` sources (local / git / npm).
-- **`/review`** — re-reads changed files against `.claude/coding-rules.md` and
-  fixes major/critical violations.
+- **`/review [base[...target]]`** — reviews changed code against
+  `.claude/coding-rules.md` and fixes major/critical violations. The optional
+  range selects the scope:
+  - `/review` — local uncommitted work (equivalent to `HEAD...local`).
+  - `/review main` — the whole branch diff vs `main` (alias for `main...HEAD`,
+    committed changes only, PR-style from the merge-base).
+  - `/review main...local` — the branch diff **plus** your uncommitted + untracked
+    work.
+  - `/review <a>...<b>` — any range between two refs/commits (e.g.
+    `abc123...def456`).
 - **Stop hook** — guarantees a review runs before a task ends; reviews until the
   working tree is stable (max 3 passes) and skips turns that changed nothing.
 
