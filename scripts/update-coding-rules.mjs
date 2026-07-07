@@ -47,7 +47,7 @@ import {
   mkdirSync,
 } from "node:fs";
 import { join, dirname, resolve, relative, sep } from "node:path";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 // Vendored single-file js-yaml bundle → no npm install, no node_modules.
 import * as yaml from "./vendor/js-yaml.mjs";
@@ -57,18 +57,31 @@ function die(msg) {
   process.exit(1);
 }
 
+// --- constants -------------------------------------------------------------
+const HASH_LEN = 16; // cache-key length taken from a sha256 hex digest
+const MAX_BUFFER = 64 * 1024 * 1024; // 64 MB — tolerate large diffs / file trees
+const CACHE_DIR_NAME = ".coding-rules-cache";
+const DEFAULT_OUTPUT = "./coding-rules.md";
+const LOCAL_VERSION = "0.0.0"; // local-path packs have no version of their own
+
 // --- helpers ---------------------------------------------------------------
 function sha(s) {
-  return createHash("sha256").update(s).digest("hex").slice(0, 16);
+  return createHash("sha256").update(s).digest("hex").slice(0, HASH_LEN);
 }
 
-function q(s) {
-  // POSIX single-quote escaping for execSync string commands.
-  return `'${String(s).replace(/'/g, "'\\''")}'`;
+// Run an external command with an explicit argument array (no shell) — avoids
+// any quoting/escaping of interpolated refs, URLs, or package specs.
+function run(cmd, args, cwd) {
+  return execFileSync(cmd, args, {
+    cwd,
+    stdio: ["ignore", "pipe", "pipe"],
+    encoding: "utf8",
+    maxBuffer: MAX_BUFFER,
+  });
 }
 
-function run(cmd, cwd) {
-  return execSync(cmd, { cwd, stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
+function errText(e) {
+  return String((e && (e.stderr || e.message)) || e).trim();
 }
 
 // Minimal glob → RegExp (supports **, *, ?), matched against POSIX-style paths.
@@ -144,7 +157,7 @@ function normalizeGitUrl(u) {
 }
 
 function resolveLocal(spec, baseDir) {
-  return { root: resolve(baseDir, spec), label: spec, version: "0.0.0", include: null };
+  return { root: resolve(baseDir, spec), label: spec, version: LOCAL_VERSION, include: null };
 }
 
 function resolveGit(entry, cacheDir) {
@@ -154,10 +167,10 @@ function resolveGit(entry, cacheDir) {
   if (!existsSync(dest)) {
     mkdirSync(dirname(dest), { recursive: true });
     try {
-      run(`git clone --filter=blob:none --quiet ${q(url)} ${q(dest)}`);
-      if (ref) run(`git checkout --quiet ${q(ref)}`, dest);
+      run("git", ["clone", "--filter=blob:none", "--quiet", url, dest]);
+      if (ref) run("git", ["checkout", "--quiet", ref], dest);
     } catch (e) {
-      die(`git source ${entry.git}${ref ? "@" + ref : ""} failed: ${String(e.stderr || e.message).trim()}`);
+      die(`git source ${entry.git}${ref ? "@" + ref : ""} failed: ${errText(e)}`);
     }
   }
   const root = entry.path ? join(dest, entry.path) : dest;
@@ -171,12 +184,12 @@ function resolveNpm(entry, cacheDir) {
   if (!existsSync(pkgDir)) {
     mkdirSync(dest, { recursive: true });
     try {
-      const out = run(`npm pack ${q(spec)} --pack-destination ${q(dest)} --json`, dest);
+      const out = run("npm", ["pack", spec, "--pack-destination", dest, "--json"], dest);
       const info = JSON.parse(out);
       const tgz = join(dest, info[0].filename);
-      run(`tar -xzf ${q(tgz)} -C ${q(dest)}`);
+      run("tar", ["-xzf", tgz, "-C", dest]);
     } catch (e) {
-      die(`npm source ${spec} failed: ${String(e.stderr || e.message).trim()}`);
+      die(`npm source ${spec} failed: ${errText(e)}`);
     }
   }
   let version = entry.version || "";
@@ -205,34 +218,27 @@ function selectMode(select, category) {
   return "enforce"; // "all", true, etc.
 }
 
-// --- main ------------------------------------------------------------------
-async function main() {
-  const configPath = [
+// --- compose ---------------------------------------------------------------
+function findConfigPath() {
+  const p = [
     resolve(process.cwd(), "coding-rules.config.yml"),
     resolve(process.cwd(), ".claude", "coding-rules.config.yml"),
   ].find(existsSync);
-  if (!configPath) {
-    die("no coding-rules.config.yml found (looked in ./ and ./.claude/).");
-  }
+  if (!p) die("no coding-rules.config.yml found (looked in ./ and ./.claude/).");
+  return p;
+}
 
-  const baseDir = dirname(configPath);
-  let config;
+function loadConfig(configPath) {
   try {
-    config = yaml.load(readFileSync(configPath, "utf8")) || {};
+    return yaml.load(readFileSync(configPath, "utf8")) || {};
   } catch (e) {
     die(`invalid YAML in ${relative(process.cwd(), configPath)}: ${e.message}`);
   }
+}
 
-  const extendsList = Array.isArray(config.extends) ? config.extends : [];
-  if (extendsList.length === 0) die("`extends` is empty — nothing to compose.");
-  const select = config.select || {};
-  const outputPath = resolve(baseDir, config.output || "./coding-rules.md");
-  const cacheDir = join(baseDir, ".coding-rules-cache");
-
-  const sources = extendsList.map((e) => resolveSource(e, baseDir, cacheDir));
-
-  // Gather rules, filter by `select`, dedup by `id` (last source wins, and the
-  // winning entry is emitted at its LAST position for a stable order).
+// Walk every source, keep rules whose category is selected, and dedup by `id`
+// (last source wins; the winner is emitted at its LAST position → stable order).
+function gatherRules(sources, select) {
   const byId = new Map();
   let scanned = 0;
   for (const src of sources) {
@@ -254,8 +260,16 @@ async function main() {
       });
     }
   }
+  return { rules: [...byId.values()], scanned };
+}
 
-  // Compose.
+function ruleHeader(r) {
+  return `<!-- module: ${r.id} · category: ${r.category} · pack: ${r.pack}@${r.version}${
+    r.warnOnly ? " · WARN-ONLY" : ""
+  } -->`;
+}
+
+function compose(config, rules) {
   const parts = [
     "<!-- GENERATED by the coding-standards plugin — do not edit by hand. -->",
     "<!-- Regenerate with /update-coding-rules. Source of truth: coding-rules.config.yml -->",
@@ -265,26 +279,45 @@ async function main() {
     parts.push("# Project context", "", String(config.projectContext).trim(), "");
   }
   parts.push("# Coding rules (composed)", "");
-  for (const r of byId.values()) {
-    parts.push(
-      `<!-- module: ${r.id} · category: ${r.category} · pack: ${r.pack}@${r.version}${
-        r.warnOnly ? " · WARN-ONLY" : ""
-      } -->`
-    );
+  for (const r of rules) {
+    parts.push(ruleHeader(r));
     if (r.warnOnly) {
       parts.push("> ⚠️ **WARN-ONLY** — report violations, do not block.", "");
     }
     parts.push(r.body, "");
   }
+  return parts.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+}
 
-  const composed = parts.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+function writeComposite(outputPath, composed) {
   mkdirSync(dirname(outputPath), { recursive: true });
   writeFileSync(outputPath, composed);
+}
+
+// --- main ------------------------------------------------------------------
+function main() {
+  const configPath = findConfigPath();
+  const baseDir = dirname(configPath);
+  const config = loadConfig(configPath);
+
+  const extendsList = Array.isArray(config.extends) ? config.extends : [];
+  if (extendsList.length === 0) die("`extends` is empty — nothing to compose.");
+  const select = config.select || {};
+  const outputPath = resolve(baseDir, config.output || DEFAULT_OUTPUT);
+  const cacheDir = join(baseDir, CACHE_DIR_NAME);
+
+  const sources = extendsList.map((e) => resolveSource(e, baseDir, cacheDir));
+  const { rules, scanned } = gatherRules(sources, select);
+  writeComposite(outputPath, compose(config, rules));
 
   process.stdout.write(
-    `Wrote ${relative(process.cwd(), outputPath)} — ${byId.size} rule file(s) ` +
+    `Wrote ${relative(process.cwd(), outputPath)} — ${rules.length} rule file(s) ` +
       `from ${sources.length} source(s) (${scanned} scanned).\n`
   );
 }
 
-main().catch((e) => die(e.stack || String(e)));
+try {
+  main();
+} catch (e) {
+  die(e.stack || String(e));
+}
