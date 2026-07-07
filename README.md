@@ -113,8 +113,9 @@ plugin reads it either way:
 
 - **`/update-coding-rules`** — composes `.claude/coding-rules.md` from the
   config's `extends` sources (local / git / npm).
-- **`/review [base[...target]]`** — reviews changed code against
-  `.claude/coding-rules.md` and fixes major/critical violations. An omitted
+- **`/review [base[...target]] [fix]`** — reviews changed code against
+  `.claude/coding-rules.md`. **Reports** major/critical violations by default; add
+  the `fix` keyword to also apply the fixes (e.g. `/review main fix`). An omitted
   `target` defaults to `local` (the working tree), so the scopes are:
   - `/review` — local uncommitted work (`HEAD...local`).
   - `/review main` — the whole branch vs `main`, **including** your uncommitted +

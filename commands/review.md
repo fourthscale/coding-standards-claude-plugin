@@ -1,15 +1,26 @@
 ---
-description: Review changed code against the composed rules. Optional arg — a `base[...target]` range (target defaults to `local` = working tree; use `...HEAD` for committed-only).
+description: Review changed code against the composed rules. Reports violations by default; add `fix` to also apply fixes. Optional range `base[...target]` (omitted target = working tree).
 ---
 
 Review code against this project's composed coding rules:
 
 @.claude/coding-rules.md
 
-## Scope — resolve `$ARGUMENTS` with this exact procedure
+## Mode — report (default) or fix
 
-`$ARGUMENTS` is an optional `base[...target]` range. Follow the steps in order;
-do not improvise or silently fall back to a different scope.
+Scan `$ARGUMENTS` for a `fix` token (case-insensitive):
+- **present** → **fix mode**: apply fixes for major/critical violations.
+- **absent** → **report mode (default)**: list violations only, and **do not edit
+  any file**.
+
+Then remove the `fix` token from `$ARGUMENTS`; whatever text remains is the range
+used below (empty = local working changes).
+
+## Scope — resolve the range with this exact procedure
+
+The range is `$ARGUMENTS` with the `fix` token removed: an optional
+`base[...target]`. Follow the steps in order; do not improvise or silently fall
+back to a different scope.
 
 **Step 1 — empty argument.** Review local uncommitted work and stop choosing:
 ```
@@ -62,9 +73,16 @@ working tree (i.e. whenever `target` is `local`).
 2. For each, inspect the **actual changes** (`git diff <range> -- <file>`), reading
    enough surrounding context to judge. Identify violations: file, line, broken
    rule, severity.
-3. Directly fix any **major** or **critical** violation (ignore as blocking the
-   modules marked WARN-ONLY).
-4. End with a summary: what was fixed, and the remaining **minor** / **info** items.
+3. Handle violations according to the mode:
+   - **Report mode (default):** do **not** modify any file — only collect the
+     findings.
+   - **Fix mode (`fix`):** directly fix every **major** or **critical** violation
+     (ignore as blocking the modules marked WARN-ONLY); leave minor/info as-is.
+4. End with a summary:
+   - **Report mode:** list all findings grouped by severity, each with `file:line`
+     and the broken rule. Mention that re-running with `fix` would apply the
+     major/critical fixes. Change no code.
+   - **Fix mode:** what was fixed, and the remaining **minor** / **info** items.
 
 If `.claude/coding-rules.md` is missing, first run `/update-coding-rules`.
 Do not invent any violation: base yourself on the real code.
