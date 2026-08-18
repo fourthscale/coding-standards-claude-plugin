@@ -1,8 +1,9 @@
 ---
-description: Review changed code against the composed rules. Reports violations by default; add `fix` to also apply fixes. Optional range `base[...target]` (omitted target = working tree).
+description: Review changed code against the project's coding rules. Reports violations by default; add `fix` to also apply fixes. Optional range `base[...target]` (omitted target = working tree).
 ---
 
-Review code against this project's composed coding rules:
+Review code against this project's coding rules. The index below lists every
+rule module in force and pulls each one into context:
 
 @.claude/coding-rules.md
 
@@ -85,4 +86,6 @@ working tree (i.e. whenever `target` is `local`).
    - **Fix mode:** what was fixed, and the remaining **minor** / **info** items.
 
 If `.claude/coding-rules.md` is missing, first run `/update-coding-rules`.
+If a module it references is missing, run it again — the index and
+`.claude/rule-packs/` are regenerated together.
 Do not invent any violation: base yourself on the real code.

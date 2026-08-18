@@ -10,8 +10,8 @@
   "plugins": [
     {
       "name": "coding-standards",
-      "description": "Puts the project's composed rules in context and guarantees a review before each task completion (local Stop hook, no token).",
-      "version": "0.4.1",
+      "description": "Indexes the project's rule modules into context without duplicating them, and guarantees a review before each task completion (local Stop hook, no token).",
+      "version": "0.5.0",
       "source": "./",
       "category": "productivity"
     }
