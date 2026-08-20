@@ -12,8 +12,10 @@ It does three things:
   rules in context from the start.
 - **Guarantee** — a `Stop` hook forces a review before Claude Code finishes a
   task: if code changed, it blocks and asks Claude to re-check the changes
-  against the indexed modules and fix. It reviews until the tree is stable
-  (max 3 passes), and never re-fires when nothing changed.
+  against the indexed modules and fix. It measures changes from the last review
+  it accepted, **not** from `HEAD`, so committing before handing back does not
+  step past it. It reviews until the tree is stable (max 3 passes), and never
+  re-fires when nothing changed.
 
 The plugin ships **no rules of its own** — you declare them in your project.
 
@@ -166,10 +168,24 @@ only thing deciding what is loaded.
     merge-base).
   - `/review <a>...<b>` — any range between two refs/commits (e.g.
     `abc123...def456`).
-- **Stop hook** — guarantees a review runs before a task ends; reviews until the
-  working tree is stable (max 3 passes) and skips turns that changed nothing.
-  It ignores its own generated artifacts (`.claude/coding-rules.md`,
-  `.claude/rule-packs/`), so regenerating them never triggers a review.
+- **Stop hook** — forces a review before a task ends; reviews until the working
+  tree is stable (max 3 passes) and skips turns that changed nothing. It ignores
+  its own generated artifacts (`.claude/coding-rules.md`, `.claude/rule-packs/`),
+  so regenerating them never triggers a review.
+
+  **What it reviews.** Everything changed since the last review it accepted —
+  committed or not. It resolves that point, in order, from: the commit recorded
+  when a review last settled (any branch, as long as it is an ancestor of `HEAD`,
+  so a branch started from a reviewed branch inherits it), then
+  `git merge-base` against `origin/HEAD`, `origin/main`, `origin/master`,
+  `main`, `master`, then `HEAD`. It never runs `fetch`: a stale ref widens the
+  reviewed set, it never makes it wrong. State lives in
+  `.git/coding-standards-stop.fingerprint`, keyed by branch — delete it to reset.
+
+  **What it does not do.** It forces a turn dedicated to the review; it cannot
+  verify the review actually happened, or that it was any good. Pair it with the
+  "mandatory review before finishing" note in your `CLAUDE.md`, and prefer
+  reviewing **before** the first commit so fixes land in the same commit.
 
 ## Layout
 
