@@ -10,8 +10,8 @@
   "plugins": [
     {
       "name": "coding-standards",
-      "description": "Indexes the project's rule modules into context without duplicating them, and guarantees a review before each task completion (local Stop hook, no token).",
-      "version": "0.5.0",
+      "description": "Indexes the project's rule modules into context without duplicating them, and forces a review before each task completion (local Stop hook, no token).",
+      "version": "0.6.0",
       "source": "./",
       "category": "productivity"
     }
